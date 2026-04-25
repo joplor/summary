@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import Header from './components/Header.jsx'
 import TranscriptPanel from './components/TranscriptPanel.jsx'
 import RightPanel from './components/RightPanel.jsx'
@@ -7,7 +7,9 @@ import SettingsModal from './components/SettingsModal.jsx'
 import SessionsModal from './components/SessionsModal.jsx'
 import ExportMenu from './components/ExportMenu.jsx'
 import ToastContainer from './components/Toast.jsx'
+import KeyboardShortcutsModal from './components/KeyboardShortcutsModal.jsx'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition.js'
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js'
 import { generateSummary, generateFlashcards, generateQuiz, explainSimply } from './services/aiService.js'
 import { exportPDF, exportMarkdown, exportTxt } from './services/exportService.js'
 import { loadSessions, saveSession, deleteSession, loadSettings, saveSettings } from './services/storageService.js'
@@ -83,10 +85,16 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [showSessions, setShowSessions] = useState(false)
   const [showExport, setShowExport] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
+  const [savedAt, setSavedAt] = useState(null)
+  const [splitPct, setSplitPct] = useState(45)
+  const [mobileTab, setMobileTab] = useState('transcript')
 
   const timerRef = useRef(null)
   const autoSummarizeRef = useRef(null)
   const lastSummarizeCountRef = useRef(0)
+  const draggingRef = useRef(false)
+  const searchInputRef = useRef(null)
 
   // Apply dark mode
   useEffect(() => {
@@ -96,11 +104,12 @@ export default function App() {
   // Persist settings
   useEffect(() => { saveSettings(settings) }, [settings])
 
-  // Persist session on change
+  // Persist session on change + update savedAt
   useEffect(() => {
     if (session.transcript.length > 0 || session.summaries.length > 0) {
       saveSession(session)
       setSessions(loadSessions())
+      setSavedAt(new Date())
     }
   }, [session])
 
@@ -133,6 +142,21 @@ export default function App() {
     }, settings.summarizeInterval * 1000)
     return () => clearInterval(autoSummarizeRef.current)
   }, [isRecording, settings.autoSummarize, settings.apiKey, session.transcript.length])
+
+  // Computed values
+  const wordCount = useMemo(() =>
+    session.transcript.reduce((n, e) => n + e.text.split(/\s+/).filter(Boolean).length, 0),
+    [session.transcript]
+  )
+
+  const searchMatchCount = useMemo(() => {
+    if (!searchQuery) return 0
+    return session.transcript.filter(e =>
+      e.text.toLowerCase().includes(searchQuery.toLowerCase())
+    ).length
+  }, [session.transcript, searchQuery])
+
+  const hasContent = session.transcript.length > 0
 
   const toast = useCallback((type, title, message, duration) => {
     const id = generateId()
@@ -356,8 +380,63 @@ export default function App() {
     setSession(s => ({ ...s, name }))
   }, [])
 
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    togglePause: () => {
+      if (!isRecording) return
+      if (isPaused) handleResume(); else handlePause()
+    },
+    showShortcuts: () => setShowShortcuts(true),
+    newSession: () => { if (!isRecording) handleNewSession() },
+    escape: () => {
+      setShowSettings(false)
+      setShowSessions(false)
+      setShowExport(false)
+      setShowShortcuts(false)
+      setSearchQuery('')
+    },
+    forceSave: () => {
+      if (session.transcript.length > 0) {
+        saveSession(session)
+        setSavedAt(new Date())
+        toast('success', 'Saved', 'Session saved manually.')
+      }
+    },
+    openExport: () => { if (hasContent) setShowExport(true) },
+  })
+
+  // Shared props objects to avoid repetition
+  const transcriptProps = {
+    transcript: session.transcript,
+    interimText,
+    searchQuery,
+    onPin: handlePinTranscriptEntry,
+    onExplain: handleExplain,
+    isRecording: isRecording && !isPaused,
+    wordCount,
+  }
+
+  const rightPanelProps = {
+    summaries: session.summaries,
+    notes: session.notes,
+    flashcards: session.flashcards,
+    quizQuestions: session.quizQuestions,
+    isAISummarizing,
+    onGenerateSummary: () => handleGenerateSummary(false),
+    onGenerateFlashcards: handleGenerateFlashcards,
+    onGenerateQuiz: handleGenerateQuiz,
+    onPinNote: handlePinNote,
+    onAddNote: handleAddNote,
+    onDeleteNote: handleDeleteNote,
+    activeTab,
+    onTabChange: setActiveTab,
+    transcript: session.transcript,
+    settings,
+    onExplain: handleExplain,
+  }
+
   return (
-    <div className={`flex flex-col h-screen app-bg overflow-hidden`}>
+    <div className="flex flex-col h-screen app-bg overflow-hidden">
       <Header
         isRecording={isRecording}
         isPaused={isPaused}
@@ -371,42 +450,70 @@ export default function App() {
         onOpenExport={() => setShowExport(true)}
         sessionName={session.name}
         onRenameSession={handleRenameSession}
-        hasContent={session.transcript.length > 0}
+        hasContent={hasContent}
+        savedAt={savedAt}
+        darkMode={settings.darkMode}
+        onToggleDark={() => setSettings(s => ({ ...s, darkMode: !s.darkMode }))}
+        onOpenShortcuts={() => setShowShortcuts(true)}
+        searchMatchCount={searchMatchCount}
+        recordingTime={recordingTime}
+        wordCount={wordCount}
       />
 
-      <main className="flex flex-1 overflow-hidden">
-        {/* Left: Transcript */}
-        <div className="w-[45%] min-w-[280px] relative overflow-hidden">
-          <TranscriptPanel
-            transcript={session.transcript}
-            interimText={interimText}
-            searchQuery={searchQuery}
-            onPin={handlePinTranscriptEntry}
-            onExplain={handleExplain}
-            isRecording={isRecording && !isPaused}
-          />
+      <main
+        className="flex flex-1 overflow-hidden"
+        onMouseMove={e => {
+          if (!draggingRef.current) return
+          const pct = (e.clientX / window.innerWidth) * 100
+          setSplitPct(Math.min(70, Math.max(30, pct)))
+        }}
+        onMouseUp={() => { draggingRef.current = false }}
+        onMouseLeave={() => { draggingRef.current = false }}
+      >
+        {/* Mobile tab switcher */}
+        <div className="md:hidden flex-1 flex flex-col overflow-hidden">
+          <div className="flex border-b border-slate-200 dark:border-slate-800 shrink-0">
+            <button
+              onClick={() => setMobileTab('transcript')}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+                mobileTab === 'transcript'
+                  ? 'text-brand-600 dark:text-brand-400 border-b-2 border-brand-500'
+                  : 'text-slate-500 dark:text-slate-400'
+              }`}
+            >
+              🎤 Transcript
+            </button>
+            <button
+              onClick={() => setMobileTab('ai')}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+                mobileTab === 'ai'
+                  ? 'text-brand-600 dark:text-brand-400 border-b-2 border-brand-500'
+                  : 'text-slate-500 dark:text-slate-400'
+              }`}
+            >
+              ✨ AI
+            </button>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            {mobileTab === 'transcript'
+              ? <TranscriptPanel {...transcriptProps} />
+              : <RightPanel {...rightPanelProps} />
+            }
+          </div>
         </div>
 
-        {/* Right: AI Panel */}
-        <div className="flex-1 overflow-hidden">
-          <RightPanel
-            summaries={session.summaries}
-            notes={session.notes}
-            flashcards={session.flashcards}
-            quizQuestions={session.quizQuestions}
-            isAISummarizing={isAISummarizing}
-            onGenerateSummary={() => handleGenerateSummary(false)}
-            onGenerateFlashcards={handleGenerateFlashcards}
-            onGenerateQuiz={handleGenerateQuiz}
-            onPinNote={handlePinNote}
-            onAddNote={handleAddNote}
-            onDeleteNote={handleDeleteNote}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            transcript={session.transcript}
-            settings={settings}
-            onExplain={handleExplain}
+        {/* Desktop: side-by-side with draggable divider */}
+        <div className="hidden md:flex flex-1 overflow-hidden">
+          <div style={{ width: `${splitPct}%` }} className="min-w-0 relative overflow-hidden">
+            <TranscriptPanel {...transcriptProps} />
+          </div>
+          <div
+            className="w-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-brand-300 dark:hover:bg-brand-700 cursor-col-resize flex-shrink-0 transition-colors"
+            onMouseDown={() => { draggingRef.current = true }}
           />
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <RightPanel {...rightPanelProps} />
+          </div>
         </div>
       </main>
 
@@ -426,6 +533,8 @@ export default function App() {
           settings={settings}
           onSave={handleSaveSettings}
           onClose={() => setShowSettings(false)}
+          darkMode={settings.darkMode}
+          onToggleDark={() => setSettings(s => ({ ...s, darkMode: !s.darkMode }))}
         />
       )}
       {showSessions && (
@@ -442,7 +551,11 @@ export default function App() {
         <ExportMenu
           onExport={handleExport}
           onClose={() => setShowExport(false)}
+          session={session}
         />
+      )}
+      {showShortcuts && (
+        <KeyboardShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
       )}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

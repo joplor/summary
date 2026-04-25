@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Eye, EyeOff, ExternalLink, Moon, Sun, Mic, Brain, Globe } from 'lucide-react'
+import { X, Eye, EyeOff, Sun, Mic, Brain, Globe } from 'lucide-react'
 
 function Toggle({ checked, onChange, label, description }) {
   return (
@@ -10,12 +10,12 @@ function Toggle({ checked, onChange, label, description }) {
       </div>
       <button
         onClick={() => onChange(!checked)}
-        className={`relative shrink-0 w-10 h-5.5 rounded-full transition-colors duration-200 focus:outline-none
+        className={`relative shrink-0 rounded-full transition-colors duration-200 focus:outline-none
           ${checked ? 'bg-brand-500' : 'bg-slate-200 dark:bg-slate-700'}`}
         style={{ height: '22px', width: '40px' }}
       >
         <span
-          className={`toggle-thumb absolute top-0.5 left-0.5 w-4.5 h-4.5 bg-white rounded-full shadow-sm`}
+          className={`toggle-thumb absolute top-0.5 left-0.5 bg-white rounded-full shadow-sm`}
           style={{
             width: '18px', height: '18px',
             transform: checked ? 'translateX(18px)' : 'translateX(0)',
@@ -42,7 +42,9 @@ function Section({ icon: Icon, title, children }) {
   )
 }
 
-export default function SettingsModal({ settings, onSave, onClose }) {
+const BROWSER_LANGUAGE = typeof navigator !== 'undefined' ? navigator.language : 'en-US'
+
+export default function SettingsModal({ settings, onSave, onClose, darkMode, onToggleDark }) {
   const [draft, setDraft] = useState({ ...settings })
   const [showKey, setShowKey] = useState(false)
 
@@ -54,10 +56,10 @@ export default function SettingsModal({ settings, onSave, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center sm:p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm animate-fade-in" />
       <div
-        className="relative w-full max-w-lg max-h-[90vh] glass-card rounded-3xl flex flex-col animate-scale-in overflow-hidden"
+        className="relative w-full h-full rounded-none sm:max-w-lg sm:max-h-[90vh] sm:rounded-3xl glass-card flex flex-col animate-scale-in overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -111,6 +113,12 @@ export default function SettingsModal({ settings, onSave, onClose }) {
                 <option value="ar-SA">العربية</option>
                 <option value="hi-IN">हिन्दी</option>
               </select>
+              <button
+                onClick={() => set('language', BROWSER_LANGUAGE)}
+                className="mt-1.5 text-xs text-brand-500 hover:text-brand-600 transition-colors"
+              >
+                Reset to browser language ({BROWSER_LANGUAGE})
+              </button>
             </div>
             <Toggle
               checked={draft.speakerDetection}

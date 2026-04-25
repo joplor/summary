@@ -2,6 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { Pin, PinOff, Copy, Wand2, ChevronDown } from 'lucide-react'
 import { highlightText, speakerDotColor } from '../utils/nlp.js'
 
+const SPEAKER_PILL_CLASSES = [
+  'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800',
+  'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800',
+  'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800',
+  'bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-400 border border-pink-200 dark:border-pink-800',
+]
+
+function getSpeakerPillClass(index) {
+  return SPEAKER_PILL_CLASSES[index % SPEAKER_PILL_CLASSES.length]
+}
+
 function TranscriptEntry({ entry, searchQuery, onPin, onExplain, isNew }) {
   const [hovered, setHovered] = useState(false)
 
@@ -9,7 +20,8 @@ function TranscriptEntry({ entry, searchQuery, onPin, onExplain, isNew }) {
     ? highlightText(entry.text, searchQuery)
     : null
 
-  const dotClass = speakerDotColor(entry.speakerIndex || 0)
+  const speakerIndex = entry.speakerIndex || 0
+  const pillClass = getSpeakerPillClass(speakerIndex)
 
   return (
     <div
@@ -17,15 +29,15 @@ function TranscriptEntry({ entry, searchQuery, onPin, onExplain, isNew }) {
         ${isNew ? 'animate-slide-up' : ''}
         ${entry.pinned
           ? 'border-l-amber-400 bg-amber-50/60 dark:bg-amber-900/10'
-          : `border-l-transparent hover:border-l-brand-300 hover:bg-slate-50/70 dark:hover:bg-slate-800/30`}
+          : 'border-l-transparent hover:border-l-brand-300 hover:bg-slate-50/70 dark:hover:bg-slate-800/30'
+        }
       `}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       {/* Speaker + time */}
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className={`w-2 h-2 rounded-full shrink-0 ${dotClass}`} />
-        <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${pillClass}`}>
           {entry.speaker}
         </span>
         <span className="text-[10px] text-slate-300 dark:text-slate-600 font-mono">
@@ -72,7 +84,7 @@ function TranscriptEntry({ entry, searchQuery, onPin, onExplain, isNew }) {
   )
 }
 
-export default function TranscriptPanel({ transcript, interimText, searchQuery, onPin, onExplain, isRecording }) {
+export default function TranscriptPanel({ transcript, interimText, searchQuery, onPin, onExplain, isRecording, wordCount }) {
   const bottomRef = useRef(null)
   const containerRef = useRef(null)
   const [autoScroll, setAutoScroll] = useState(true)
@@ -115,6 +127,11 @@ export default function TranscriptPanel({ transcript, interimText, searchQuery, 
               {searchQuery ? `${filteredTranscript.length} matches` : `${transcript.length} segments`}
             </span>
           )}
+          {wordCount > 0 && !searchQuery && (
+            <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-full">
+              {wordCount.toLocaleString()} words
+            </span>
+          )}
         </div>
         {!autoScroll && (
           <button
@@ -136,6 +153,19 @@ export default function TranscriptPanel({ transcript, interimText, searchQuery, 
           <EmptyState isRecording={isRecording} hasSearchQuery={!!searchQuery} />
         ) : (
           <>
+            {/* Waveform animation when recording */}
+            {isRecording && filteredTranscript.length === 0 && !interimText && (
+              <div className="flex items-end justify-center gap-0.5 h-5 my-3">
+                {Array.from({ length: 8 }, (_, i) => (
+                  <div
+                    key={i}
+                    className="w-1 bg-red-400 dark:bg-red-500 rounded-full waveform-bar"
+                    style={{ animationDelay: `${i * 80}ms` }}
+                  />
+                ))}
+              </div>
+            )}
+
             {filteredTranscript.map((entry, i) => (
               <TranscriptEntry
                 key={entry.id}
@@ -149,12 +179,21 @@ export default function TranscriptPanel({ transcript, interimText, searchQuery, 
 
             {/* Interim text */}
             {interimText && (
-              <div className="px-5 py-3.5 border-l-2 border-l-brand-300">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="w-2 h-2 rounded-full bg-brand-400 animate-pulse-dot" />
+              <div className="px-5 py-3.5 border-l-2 border-l-brand-300 bg-blue-50/40 dark:bg-blue-900/10">
+                <div className="flex items-center gap-2 mb-2">
+                  {/* Waveform while listening */}
+                  <div className="flex items-end gap-0.5 h-5">
+                    {Array.from({ length: 8 }, (_, i) => (
+                      <div
+                        key={i}
+                        className="w-1 bg-red-400 dark:bg-red-500 rounded-full waveform-bar"
+                        style={{ animationDelay: `${i * 80}ms` }}
+                      />
+                    ))}
+                  </div>
                   <span className="text-[11px] font-semibold text-brand-500 uppercase tracking-wide">Listening…</span>
                 </div>
-                <p className="interim-text text-sm leading-relaxed">{interimText}</p>
+                <p className="interim-text text-sm leading-relaxed pl-1">{interimText}</p>
               </div>
             )}
           </>
@@ -190,10 +229,21 @@ function EmptyState({ isRecording, hasSearchQuery }) {
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-8 animate-fade-in">
-      <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-brand-100 to-violet-100 dark:from-brand-900/30 dark:to-violet-900/30 flex items-center justify-center">
+      <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-brand-100 to-blue-100 dark:from-brand-900/30 dark:to-blue-900/30 flex items-center justify-center">
         <span className="text-3xl">{isRecording ? '🎧' : '🎤'}</span>
       </div>
       <div>
+        {isRecording && (
+          <div className="flex items-end justify-center gap-0.5 h-5 mb-3">
+            {Array.from({ length: 8 }, (_, i) => (
+              <div
+                key={i}
+                className="w-1 bg-red-400 dark:bg-red-500 rounded-full waveform-bar"
+                style={{ animationDelay: `${i * 80}ms` }}
+              />
+            ))}
+          </div>
+        )}
         <p className="text-sm font-semibold text-slate-600 dark:text-slate-300 mb-1">
           {isRecording ? 'Listening for speech…' : 'Ready to record'}
         </p>

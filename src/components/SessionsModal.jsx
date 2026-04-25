@@ -1,12 +1,12 @@
-import { useState } from 'react'
-import { X, Clock, Trash2, Download, RotateCcw, Mic } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { X, Trash2, RotateCcw, Mic, Search } from 'lucide-react'
 import { formatDuration } from '../utils/nlp.js'
 
 function SessionItem({ session, onLoad, onDelete, isCurrent }) {
   const duration = session.endTime
     ? Math.floor((session.endTime - session.startTime) / 1000)
     : null
-  const wordCount = session.transcript?.reduce((s, e) => s + e.text.split(/\s+/).length, 0) || 0
+  const segmentCount = session.transcript?.length || 0
 
   return (
     <div className={`group flex items-center gap-3 p-3.5 rounded-2xl border transition-all cursor-pointer card-hover
@@ -24,10 +24,10 @@ function SessionItem({ session, onLoad, onDelete, isCurrent }) {
           {session.name}
           {isCurrent && <span className="ml-2 text-[10px] text-brand-500 font-bold uppercase tracking-wide">Current</span>}
         </p>
-        <div className="flex items-center gap-2 mt-0.5">
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           <span className="text-xs text-slate-400">{new Date(session.startTime).toLocaleDateString()}</span>
           {duration && <span className="text-xs text-slate-400">{formatDuration(duration)}</span>}
-          {wordCount > 0 && <span className="text-xs text-slate-400">{wordCount.toLocaleString()} words</span>}
+          <span className="text-xs text-slate-400">{segmentCount} segments</span>
         </div>
       </div>
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -53,11 +53,30 @@ function SessionItem({ session, onLoad, onDelete, isCurrent }) {
 }
 
 export default function SessionsModal({ sessions, currentSessionId, onLoad, onDelete, onNew, onClose }) {
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortBy, setSortBy] = useState('newest')
+
+  const filtered = useMemo(() => {
+    let list = [...sessions]
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      list = list.filter(s => s.name.toLowerCase().includes(q))
+    }
+    if (sortBy === 'newest') {
+      list.sort((a, b) => b.startTime - a.startTime)
+    } else if (sortBy === 'oldest') {
+      list.sort((a, b) => a.startTime - b.startTime)
+    } else if (sortBy === 'segments') {
+      list.sort((a, b) => (b.transcript?.length || 0) - (a.transcript?.length || 0))
+    }
+    return list
+  }, [sessions, searchQuery, sortBy])
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center sm:p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm animate-fade-in" />
       <div
-        className="relative w-full max-w-md max-h-[80vh] glass-card rounded-3xl flex flex-col animate-scale-in overflow-hidden"
+        className="relative w-full h-full rounded-none sm:max-w-md sm:max-h-[85vh] sm:rounded-3xl glass-card flex flex-col animate-scale-in overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200/60 dark:border-slate-700/60 shrink-0">
@@ -70,14 +89,49 @@ export default function SessionsModal({ sessions, currentSessionId, onLoad, onDe
           </button>
         </div>
 
+        {/* Search + sort */}
+        <div className="px-4 pt-3 pb-2 shrink-0 space-y-2">
+          <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 rounded-xl px-3 py-2 border border-slate-200 dark:border-slate-700 focus-within:border-brand-400 transition-colors">
+            <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <input
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search sessions…"
+              className="bg-transparent text-sm text-slate-700 dark:text-slate-200 outline-none flex-1 min-w-0 placeholder:text-slate-400"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-400 shrink-0">Sort:</span>
+            {[
+              { id: 'newest', label: 'Newest' },
+              { id: 'oldest', label: 'Oldest' },
+              { id: 'segments', label: 'Most segments' },
+            ].map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => setSortBy(opt.id)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                  sortBy === opt.id
+                    ? 'bg-brand-500 text-white'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-2">
-          {sessions.length === 0 ? (
+          {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-32 gap-3 text-center animate-fade-in">
               <span className="text-3xl">📂</span>
-              <p className="text-sm text-slate-500 dark:text-slate-400">No saved sessions yet</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                {searchQuery ? 'No sessions match your search' : 'No saved sessions yet'}
+              </p>
             </div>
           ) : (
-            sessions.map(s => (
+            filtered.map(s => (
               <SessionItem
                 key={s.id}
                 session={s}
