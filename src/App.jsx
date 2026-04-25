@@ -122,9 +122,14 @@ export default function App() {
 
   const handleInterim = useCallback((text) => setInterimText(text), [])
 
+  const handleRecognitionStart = useCallback(() => {
+    toast('success', '🎤 Listening', 'Speak clearly — words will appear as you talk.')
+  }, [toast])
+
   const { isSupported, isListening, error, micPermission, start, stop } = useSpeechRecognition({
     onEntry: handleEntry,
     onInterim: handleInterim,
+    onStart: handleRecognitionStart,
     settings,
   })
 

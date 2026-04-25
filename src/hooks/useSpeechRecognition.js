@@ -3,7 +3,7 @@ import { generateId, speakerColor } from '../utils/nlp.js'
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
 
-export function useSpeechRecognition({ onEntry, onInterim, settings }) {
+export function useSpeechRecognition({ onEntry, onInterim, onStart, settings }) {
   const recognitionRef = useRef(null)
   const [isSupported] = useState(() => !!SpeechRecognition)
   const [isListening, setIsListening] = useState(false)
@@ -47,6 +47,7 @@ export function useSpeechRecognition({ onEntry, onInterim, settings }) {
       setIsListening(true)
       setError(null)
       setMicPermission('granted')
+      onStart?.()
     }
 
     recognition.onresult = (event) => {
@@ -105,7 +106,7 @@ export function useSpeechRecognition({ onEntry, onInterim, settings }) {
       setError('Could not start recording: ' + e.message)
       recognitionRef.current = null
     }
-  }, [getSpeaker, onEntry, onInterim])
+  }, [getSpeaker, onEntry, onInterim, onStart])
 
   const start = useCallback(async (language = 'en-US') => {
     if (!isSupported) {
@@ -119,16 +120,19 @@ export function useSpeechRecognition({ onEntry, onInterim, settings }) {
     // error if the user has blocked it — rather than silently failing.
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      // Release immediately — SpeechRecognition manages its own mic handle
-      stream.getTracks().forEach(t => t.stop())
       setMicPermission('granted')
+      // Start recognition BEFORE releasing the getUserMedia stream.
+      // Releasing it immediately causes a race condition where Chrome
+      // sees the mic as "releasing" and SpeechRecognition silently fails.
+      // Waiting 500 ms gives recognition time to claim the mic first.
+      startRecognition(language)
+      setTimeout(() => stream.getTracks().forEach(t => t.stop()), 500)
     } catch (err) {
       setMicPermission('denied')
       setError('not-allowed')
       return false  // signal to caller that we couldn't start
     }
 
-    startRecognition(language)
     return true
   }, [isSupported, startRecognition])
 
