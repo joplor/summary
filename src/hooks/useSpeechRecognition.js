@@ -3,18 +3,19 @@ import { generateId, speakerColor } from '../utils/nlp.js'
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
 
-export function useSpeechRecognition({ onEntry, onInterim, onStart, settings }) {
+export function useSpeechRecognition({ onEntry, onInterim, onStart, onPermissionDenied, settings }) {
   const recognitionRef = useRef(null)
+  const restartTimerRef = useRef(null)
   const [isSupported] = useState(() => !!SpeechRecognition)
   const [isListening, setIsListening] = useState(false)
   const [error, setError] = useState(null)
-  const [micPermission, setMicPermission] = useState('unknown') // 'unknown' | 'granted' | 'denied' | 'prompt'
+  const [micPermission, setMicPermission] = useState('unknown')
 
   const lastSpeechRef = useRef(Date.now())
   const speakerIndexRef = useRef(0)
   const pauseThreshold = 5000
 
-  // Check microphone permission state on mount
+  // Track mic permission state via Permissions API
   useEffect(() => {
     if (!navigator.permissions) return
     navigator.permissions.query({ name: 'microphone' }).then(result => {
@@ -57,7 +58,7 @@ export function useSpeechRecognition({ onEntry, onInterim, onStart, settings }) 
         const text = result[0].transcript
         if (result.isFinal) {
           const trimmed = text.trim()
-          if (trimmed.length > 1) {
+          if (trimmed.length >= 1) {
             const speaker = getSpeaker()
             onEntry({
               id: generateId(),
@@ -78,21 +79,30 @@ export function useSpeechRecognition({ onEntry, onInterim, onStart, settings }) 
     }
 
     recognition.onerror = (event) => {
-      if (event.error === 'no-speech') return
-      if (event.error === 'aborted') return
+      if (event.error === 'no-speech') return   // normal — just silence
+      if (event.error === 'aborted') return      // normal — we stopped it
+      if (event.error === 'network') return      // transient — onend will restart
       if (event.error === 'not-allowed') {
         setMicPermission('denied')
         setError('not-allowed')
         recognitionRef.current = null
         setIsListening(false)
+        onPermissionDenied?.()
         return
       }
       setError(`Speech error: ${event.error}`)
     }
 
     recognition.onend = () => {
+      // If we're still supposed to be recording, restart after a short delay.
+      // Immediate restart causes "InvalidStateError" in some Chrome versions.
       if (recognitionRef.current) {
-        try { recognition.start() } catch { /* ignore */ }
+        clearTimeout(restartTimerRef.current)
+        restartTimerRef.current = setTimeout(() => {
+          if (recognitionRef.current) {
+            try { recognition.start() } catch { /* ignore transient errors */ }
+          }
+        }, 200)
       } else {
         setIsListening(false)
         onInterim('')
@@ -106,37 +116,24 @@ export function useSpeechRecognition({ onEntry, onInterim, onStart, settings }) 
       setError('Could not start recording: ' + e.message)
       recognitionRef.current = null
     }
-  }, [getSpeaker, onEntry, onInterim, onStart])
+  }, [getSpeaker, onEntry, onInterim, onStart, onPermissionDenied])
 
-  const start = useCallback(async (language = 'en-US') => {
+  // No getUserMedia pre-step — it was causing a race condition where
+  // getUserMedia held the hardware mic while SpeechRecognition tried to
+  // claim it, leading to silent failures. SpeechRecognition handles its
+  // own permission prompt natively in Chrome/Edge on HTTPS.
+  const start = useCallback((language = 'en-US') => {
     if (!isSupported) {
-      setError('Speech recognition is not supported in this browser. Please use Chrome or Edge.')
-      return
+      setError('not-supported')
+      return false
     }
-    if (recognitionRef.current) return
-
-    // Explicitly request mic access first. This triggers Chrome's
-    // permission dialog if not yet decided, and surfaces a clear
-    // error if the user has blocked it — rather than silently failing.
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      setMicPermission('granted')
-      // Start recognition BEFORE releasing the getUserMedia stream.
-      // Releasing it immediately causes a race condition where Chrome
-      // sees the mic as "releasing" and SpeechRecognition silently fails.
-      // Waiting 500 ms gives recognition time to claim the mic first.
-      startRecognition(language)
-      setTimeout(() => stream.getTracks().forEach(t => t.stop()), 500)
-    } catch (err) {
-      setMicPermission('denied')
-      setError('not-allowed')
-      return false  // signal to caller that we couldn't start
-    }
-
+    if (recognitionRef.current) return true
+    startRecognition(language)
     return true
   }, [isSupported, startRecognition])
 
   const stop = useCallback(() => {
+    clearTimeout(restartTimerRef.current)
     if (recognitionRef.current) {
       const r = recognitionRef.current
       recognitionRef.current = null
@@ -148,8 +145,10 @@ export function useSpeechRecognition({ onEntry, onInterim, onStart, settings }) 
     lastSpeechRef.current = 0
   }, [onInterim])
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
+      clearTimeout(restartTimerRef.current)
       if (recognitionRef.current) {
         recognitionRef.current.stop()
         recognitionRef.current = null

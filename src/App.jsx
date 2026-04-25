@@ -13,11 +13,29 @@ import { exportPDF, exportMarkdown, exportTxt } from './services/exportService.j
 import { loadSessions, saveSession, deleteSession, loadSettings, saveSettings } from './services/storageService.js'
 import { detectTopics, generateId } from './utils/nlp.js'
 
+// Map bare language codes (e.g. "nb") to full BCP-47 locales Chrome accepts
+function normalizeLanguage(lang) {
+  if (!lang) return 'en-US'
+  if (lang.includes('-') || lang.includes('_')) return lang.replace('_', '-')
+  const map = {
+    nb: 'nb-NO', nn: 'nn-NO', no: 'nb-NO',
+    en: 'en-US', fr: 'fr-FR', de: 'de-DE',
+    es: 'es-ES', it: 'it-IT', pt: 'pt-BR',
+    nl: 'nl-NL', sv: 'sv-SE', da: 'da-DK',
+    fi: 'fi-FI', pl: 'pl-PL', ru: 'ru-RU',
+    zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR',
+    ar: 'ar-SA', hi: 'hi-IN',
+  }
+  return map[lang.toLowerCase()] || lang
+}
+
+const BROWSER_LANGUAGE = normalizeLanguage(navigator.language)
+
 const DEFAULT_SETTINGS = {
   darkMode: false,
   autoSummarize: true,
   summarizeInterval: 60,
-  language: navigator.language || 'en-US',
+  language: BROWSER_LANGUAGE,
   aiProvider: 'openai',
   apiKey: '',
   proxyUrl: '',
@@ -41,7 +59,16 @@ function newSession(name) {
 }
 
 export default function App() {
-  const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...loadSettings() }))
+  const [settings, setSettings] = useState(() => {
+    const stored = loadSettings()
+    const merged = { ...DEFAULT_SETTINGS, ...(stored || {}) }
+    // Migration: if the stored language is the old hardcoded 'en-US' default
+    // and the browser is not an English locale, use the browser's language instead.
+    if (stored && stored.language === 'en-US' && !BROWSER_LANGUAGE.startsWith('en')) {
+      merged.language = BROWSER_LANGUAGE
+    }
+    return merged
+  })
   const [session, setSession] = useState(() => newSession())
   const [sessions, setSessions] = useState(() => loadSessions())
   const [interimText, setInterimText] = useState('')
@@ -126,10 +153,16 @@ export default function App() {
     toast('success', '🎤 Listening', 'Speak clearly — words will appear as you talk.')
   }, [toast])
 
+  const handlePermissionDenied = useCallback(() => {
+    setIsRecording(false)
+    setIsPaused(false)
+  }, [])
+
   const { isSupported, isListening, error, micPermission, start, stop } = useSpeechRecognition({
     onEntry: handleEntry,
     onInterim: handleInterim,
     onStart: handleRecognitionStart,
+    onPermissionDenied: handlePermissionDenied,
     settings,
   })
 
@@ -138,14 +171,16 @@ export default function App() {
     if (!error) return
     if (error === 'not-allowed') {
       toast('error', 'Microphone blocked',
-        'Chrome blocked the mic. Click the 🔒 lock icon in the address bar → Site settings → Microphone → Allow, then refresh.',
+        'Click the 🔒 lock icon in the address bar → Site settings → Microphone → Allow, then refresh the page.',
         8000)
+    } else if (error === 'not-supported') {
+      toast('error', 'Browser not supported', 'Speech recognition requires Chrome or Edge.')
     } else {
       toast('error', 'Microphone error', error)
     }
   }, [error])
 
-  const handleStartStop = useCallback(async () => {
+  const handleStartStop = useCallback(() => {
     if (isRecording) {
       stop()
       setIsRecording(false)
@@ -160,10 +195,7 @@ export default function App() {
       }
       setRecordingTime(0)
       lastSummarizeCountRef.current = 0
-      // start() requests mic permission first via getUserMedia, then
-      // starts SpeechRecognition. It sets error='not-allowed' if blocked.
-      const ok = await start(settings.language)
-      if (ok === false) return  // mic was denied, error toast already shown
+      start(settings.language)
       setIsRecording(true)
       setIsPaused(false)
     }

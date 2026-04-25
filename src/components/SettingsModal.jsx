@@ -90,18 +90,26 @@ export default function SettingsModal({ settings, onSave, onClose }) {
                 onChange={e => set('language', e.target.value)}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-700 dark:text-slate-200 outline-none focus:border-brand-400 transition-colors"
               >
+                <option value="nb-NO">Norsk bokmål</option>
+                <option value="nn-NO">Norsk nynorsk</option>
                 <option value="en-US">English (US)</option>
                 <option value="en-GB">English (UK)</option>
-                <option value="es-ES">Spanish</option>
-                <option value="fr-FR">French</option>
-                <option value="de-DE">German</option>
-                <option value="it-IT">Italian</option>
-                <option value="pt-BR">Portuguese (Brazil)</option>
-                <option value="zh-CN">Chinese (Simplified)</option>
-                <option value="ja-JP">Japanese</option>
-                <option value="ko-KR">Korean</option>
-                <option value="ar-SA">Arabic</option>
-                <option value="hi-IN">Hindi</option>
+                <option value="sv-SE">Svenska</option>
+                <option value="da-DK">Dansk</option>
+                <option value="fi-FI">Suomi</option>
+                <option value="de-DE">Deutsch</option>
+                <option value="fr-FR">Français</option>
+                <option value="es-ES">Español</option>
+                <option value="it-IT">Italiano</option>
+                <option value="pt-BR">Português (Brasil)</option>
+                <option value="nl-NL">Nederlands</option>
+                <option value="pl-PL">Polski</option>
+                <option value="ru-RU">Русский</option>
+                <option value="zh-CN">中文 (简体)</option>
+                <option value="ja-JP">日本語</option>
+                <option value="ko-KR">한국어</option>
+                <option value="ar-SA">العربية</option>
+                <option value="hi-IN">हिन्दी</option>
               </select>
             </div>
             <Toggle
