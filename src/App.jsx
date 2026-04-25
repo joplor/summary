@@ -122,18 +122,25 @@ export default function App() {
 
   const handleInterim = useCallback((text) => setInterimText(text), [])
 
-  const { isSupported, isListening, error, start, stop } = useSpeechRecognition({
+  const { isSupported, isListening, error, micPermission, start, stop } = useSpeechRecognition({
     onEntry: handleEntry,
     onInterim: handleInterim,
     settings,
   })
 
-  // Show speech errors as toasts
+  // Show speech errors as toasts with helpful guidance
   useEffect(() => {
-    if (error) toast('error', 'Microphone Error', error)
+    if (!error) return
+    if (error === 'not-allowed') {
+      toast('error', 'Microphone blocked',
+        'Chrome blocked the mic. Click the 🔒 lock icon in the address bar → Site settings → Microphone → Allow, then refresh.',
+        8000)
+    } else {
+      toast('error', 'Microphone error', error)
+    }
   }, [error])
 
-  const handleStartStop = useCallback(() => {
+  const handleStartStop = useCallback(async () => {
     if (isRecording) {
       stop()
       setIsRecording(false)
@@ -148,10 +155,12 @@ export default function App() {
       }
       setRecordingTime(0)
       lastSummarizeCountRef.current = 0
-      start(settings.language)
+      // start() requests mic permission first via getUserMedia, then
+      // starts SpeechRecognition. It sets error='not-allowed' if blocked.
+      const ok = await start(settings.language)
+      if (ok === false) return  // mic was denied, error toast already shown
       setIsRecording(true)
       setIsPaused(false)
-      toast('info', 'Recording started', 'Speak into your microphone.')
     }
   }, [isRecording, isSupported, stop, start, settings.language, session.transcript.length, toast])
 

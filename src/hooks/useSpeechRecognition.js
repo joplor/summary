@@ -8,10 +8,20 @@ export function useSpeechRecognition({ onEntry, onInterim, settings }) {
   const [isSupported] = useState(() => !!SpeechRecognition)
   const [isListening, setIsListening] = useState(false)
   const [error, setError] = useState(null)
+  const [micPermission, setMicPermission] = useState('unknown') // 'unknown' | 'granted' | 'denied' | 'prompt'
 
   const lastSpeechRef = useRef(Date.now())
   const speakerIndexRef = useRef(0)
-  const pauseThreshold = 5000 // ms between segments = potential speaker change
+  const pauseThreshold = 5000
+
+  // Check microphone permission state on mount
+  useEffect(() => {
+    if (!navigator.permissions) return
+    navigator.permissions.query({ name: 'microphone' }).then(result => {
+      setMicPermission(result.state)
+      result.onchange = () => setMicPermission(result.state)
+    }).catch(() => {})
+  }, [])
 
   const getSpeaker = useCallback(() => {
     const now = Date.now()
@@ -24,11 +34,7 @@ export function useSpeechRecognition({ onEntry, onInterim, settings }) {
     return { name: `Speaker ${idx + 1}`, colorClass: speakerColor(idx), index: idx }
   }, [])
 
-  const start = useCallback((language = 'en-US') => {
-    if (!isSupported) {
-      setError('Speech recognition not supported in this browser. Try Chrome or Edge.')
-      return
-    }
+  const startRecognition = useCallback((language) => {
     if (recognitionRef.current) return
 
     const recognition = new SpeechRecognition()
@@ -40,6 +46,7 @@ export function useSpeechRecognition({ onEntry, onInterim, settings }) {
     recognition.onstart = () => {
       setIsListening(true)
       setError(null)
+      setMicPermission('granted')
     }
 
     recognition.onresult = (event) => {
@@ -72,11 +79,17 @@ export function useSpeechRecognition({ onEntry, onInterim, settings }) {
     recognition.onerror = (event) => {
       if (event.error === 'no-speech') return
       if (event.error === 'aborted') return
+      if (event.error === 'not-allowed') {
+        setMicPermission('denied')
+        setError('not-allowed')
+        recognitionRef.current = null
+        setIsListening(false)
+        return
+      }
       setError(`Speech error: ${event.error}`)
     }
 
     recognition.onend = () => {
-      // Auto-restart if still supposed to be listening
       if (recognitionRef.current) {
         try { recognition.start() } catch { /* ignore */ }
       } else {
@@ -92,7 +105,32 @@ export function useSpeechRecognition({ onEntry, onInterim, settings }) {
       setError('Could not start recording: ' + e.message)
       recognitionRef.current = null
     }
-  }, [isSupported, getSpeaker, onEntry, onInterim])
+  }, [getSpeaker, onEntry, onInterim])
+
+  const start = useCallback(async (language = 'en-US') => {
+    if (!isSupported) {
+      setError('Speech recognition is not supported in this browser. Please use Chrome or Edge.')
+      return
+    }
+    if (recognitionRef.current) return
+
+    // Explicitly request mic access first. This triggers Chrome's
+    // permission dialog if not yet decided, and surfaces a clear
+    // error if the user has blocked it — rather than silently failing.
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      // Release immediately — SpeechRecognition manages its own mic handle
+      stream.getTracks().forEach(t => t.stop())
+      setMicPermission('granted')
+    } catch (err) {
+      setMicPermission('denied')
+      setError('not-allowed')
+      return false  // signal to caller that we couldn't start
+    }
+
+    startRecognition(language)
+    return true
+  }, [isSupported, startRecognition])
 
   const stop = useCallback(() => {
     if (recognitionRef.current) {
@@ -102,7 +140,6 @@ export function useSpeechRecognition({ onEntry, onInterim, settings }) {
     }
     setIsListening(false)
     onInterim('')
-    // Reset speaker tracking for next session
     speakerIndexRef.current = 0
     lastSpeechRef.current = 0
   }, [onInterim])
@@ -116,5 +153,5 @@ export function useSpeechRecognition({ onEntry, onInterim, settings }) {
     }
   }, [])
 
-  return { isSupported, isListening, error, start, stop }
+  return { isSupported, isListening, error, micPermission, start, stop }
 }
