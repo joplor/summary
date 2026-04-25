@@ -17,7 +17,7 @@ const DEFAULT_SETTINGS = {
   darkMode: false,
   autoSummarize: true,
   summarizeInterval: 60,
-  language: 'en-US',
+  language: navigator.language || 'en-US',
   aiProvider: 'openai',
   apiKey: '',
   proxyUrl: '',
